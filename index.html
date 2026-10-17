@@ -1626,7 +1626,21 @@ refreshUI();
 /* ---------- Snap to teacher & teacher album ----------
    Photos go to the teacher's Google Drive through the Apps Script web app (PREP_API, gas/Code.gs).
    The teacher album reads them back through the same web app, behind a teacher password. */
-const api=body=>fetch(PREP_API,{method:'POST',body:JSON.stringify(body)}).then(r=>r.json());
+/* Any failure becomes an Error whose message names the cause (shown to the teacher/student for troubleshooting) */
+async function api(body){
+  let res;
+  try{res=await fetch(PREP_API,{method:'POST',body:JSON.stringify(body)});}
+  catch(e){throw new Error('network');}
+  const text=await res.text();
+  try{return JSON.parse(text);}
+  catch(e){throw new Error(/<html|<!doctype/i.test(text)?'html:'+res.status:'bad:'+res.status);}
+}
+function sendErrMsg(e){
+  const m=String(e&&e.message||'');
+  if(m==='network') return "Couldn't reach the server. Check the internet. 서버에 연결하지 못했어요. 인터넷 연결을 확인해 주세요. (network)";
+  if(m.startsWith('html')) return "The Google web app answered with a web page, not data. Ask your teacher to check the deployment. 구글 웹 앱 설정 문제예요. 선생님께 알려 주세요. ("+m+")";
+  return "Couldn't send. Try again. 보내지 못했어요. 다시 눌러 보세요. ("+m+")";
+}
 if(PREP_API) $('#albumBtn').hidden=false; else $('#snapBtn').hidden=true;
 function freeSentences(){const out=[]; for(let i=freeTrail.length-1;i>=0&&freeTrail[i]!==null;i--) out.unshift(freeTrail[i]); return out;}
 const snapModal=$('#snapModal'), snapMsg=$('#snapMsg');
@@ -1657,11 +1671,11 @@ $('#snapSend').addEventListener('click',async()=>{
   try{
     const r=await api({a:'snap',grade:who.grade,cls:who.cls,num:who.num,name:who.name,sentences:freeSentences().slice(-30),
       img:snapCanvas.toDataURL('image/jpeg',0.85).split(',')[1],thumb:jpegB64(snapCanvas,360,0.7)});
-    if(!r.ok) throw new Error(r.err||'failed');
+    if(!r.ok) throw new Error('server:'+(r.err||'failed'));
     setMsg(snapMsg,'Sent! Your teacher can see it now. 보냈어요! 선생님이 볼 수 있어요.','ok');
     const sep=document.createElement('li'); sep.className='sep'; sep.textContent='📸 Sent to teacher · 선생님께 보냄'; logEl.prepend(sep);
   }catch(e){
-    setMsg(snapMsg,"Couldn't send. Check the internet and try again. 보내지 못했어요. 인터넷 연결을 확인하고 다시 눌러 보세요.",'bad');
+    setMsg(snapMsg,sendErrMsg(e),'bad');
     $('#snapSend').disabled=false;
   }
   snapBusy=false;
@@ -1704,7 +1718,8 @@ async function loadAlbum(key){
     albumDocs=[...by.values()]; albumDocs.forEach(d=>d.shots.sort((a,b)=>a.at-b.at));
     renderAlbum();
   }catch(e){
-    $('#albumEmpty').textContent="Couldn't load the album. Check the internet. 앨범을 불러오지 못했어요. 인터넷 연결을 확인해 주세요.";
+    albumEl.hidden=false; $('#albumEmpty').hidden=false;
+    $('#albumEmpty').textContent="Couldn't load the album. 앨범을 불러오지 못했어요. "+sendErrMsg(e);
   }finally{albumBusy=false;}
 }
 let tpwTried=false;
