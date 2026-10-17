@@ -261,7 +261,7 @@ body.mission-mode #snapBtn{display:none}
         <button id="modeFree" type="button" aria-pressed="true">Free<span class="ko">자유</span></button>
         <button id="modeMission" type="button" aria-pressed="false">Mission<span class="ko">미션</span></button>
       </div>
-      <button id="albumBtn" class="btn" type="button" hidden>Class album<span class="ko">반별 앨범</span></button>
+      <button id="albumBtn" class="btn" type="button" hidden>Teacher album<span class="ko">선생님 앨범</span></button>
       <span class="count" id="count">0 sentences</span>
       <button id="undo" class="btn" type="button" disabled>Undo<span class="ko">되돌리기</span></button>
       <button id="reset" class="btn" type="button">Reset<span class="ko">처음부터</span></button>
@@ -356,11 +356,27 @@ body.mission-mode #snapBtn{display:none}
 <div id="album" class="album" hidden>
   <div class="album-top">
     <h2>Class album <span>반별 앨범</span></h2>
-    <button id="albumClose" class="btn" type="button">Close<span class="ko">닫기</span></button>
+    <div class="tools">
+      <button id="albumLock" class="btn" type="button">Lock<span class="ko">잠그기</span></button>
+      <button id="albumClose" class="btn" type="button">Close<span class="ko">닫기</span></button>
+    </div>
   </div>
   <div class="tabs" id="albumTabs"></div>
   <div class="grid" id="albumGrid"></div>
   <p class="empty" id="albumEmpty">No photos yet. Students' photos will show up here. 아직 사진이 없어요. 학생들이 보낸 사진이 여기에 모여요.</p>
+</div>
+
+<div id="pwModal" class="modal" hidden>
+  <form class="sheet" id="pwForm" role="dialog" aria-modal="true" aria-labelledby="pwTitle" autocomplete="off">
+    <h2 id="pwTitle"></h2>
+    <p class="ko" id="pwHelp" style="margin:0"></p>
+    <div class="who"><label class="wide" style="grid-column:1/-1">Password 암호<input id="pwInput" type="password"></label></div>
+    <p class="msg" id="pwMsg" hidden></p>
+    <div class="sheet-btns">
+      <button id="pwCancel" class="btn" type="button">Cancel<span class="ko">취소</span></button>
+      <button class="btn primary" type="submit">Open<span class="ko">열기</span></button>
+    </div>
+  </form>
 </div>
 
 <div id="shotModal" class="modal" hidden>
@@ -1607,20 +1623,11 @@ defaultRoom();
 const defaultSnap=snapshot();
 ITEMS.forEach(it=>{const t=targetOf(it), m=it.mesh; m.position.set(t.x,t.y,t.z); m.scale.setScalar(t.s); m.rotation.y=t.r;});
 refreshUI();
-/* ---------- Snap to teacher & class album ----------
-   Each student keeps ONE doc album/<their id> = {grade, cls, num, name, updatedAt, shots:[...]}
-   (rules: only the teacher (editors) reads the album; each student writes only their own doc).
-   A shot holds an asset id when uploads work, else a small JPEG data URL. */
-const MAX_SHOTS=5;
-let caps={db:null,user:null,assets:null,uid:null,editor:false};
-const capsReady=(async()=>{
-  try{
-    const [db,user,assets]=await Promise.all([claude.use('db'),claude.use('user'),claude.use('assets')]);
-    caps.db=db; caps.user=user; caps.assets=assets;
-    if(user){caps.uid=await user.id(); caps.editor=await user.canEdit();}
-    if(caps.editor&&db) $('#albumBtn').hidden=false;
-  }catch(e){}
-})();
+/* ---------- Snap to teacher & teacher album ----------
+   Photos go to the teacher's Google Drive through the Apps Script web app (PREP_API, gas/Code.gs).
+   The teacher album reads them back through the same web app, behind a teacher password. */
+const api=body=>fetch(PREP_API,{method:'POST',body:JSON.stringify(body)}).then(r=>r.json());
+if(PREP_API) $('#albumBtn').hidden=false; else $('#snapBtn').hidden=true;
 function freeSentences(){const out=[]; for(let i=freeTrail.length-1;i>=0&&freeTrail[i]!==null;i--) out.unshift(freeTrail[i]); return out;}
 const snapModal=$('#snapModal'), snapMsg=$('#snapMsg');
 ['sGrade','sClass'].forEach((id,k)=>{const sel=$('#'+id); for(let i=1;i<=(k?15:3);i++){const o=document.createElement('option'); o.value=o.textContent=String(i); sel.appendChild(o);}});
@@ -1637,10 +1644,9 @@ $('#snapBtn').addEventListener('click',()=>{
 });
 $('#snapCancel').addEventListener('click',()=>{snapModal.hidden=true;});
 snapModal.addEventListener('click',e=>{if(e.target===snapModal) snapModal.hidden=true;});
-function jpegBlob(cv,q){return new Promise(r=>cv.toBlob(r,'image/jpeg',q));}
-function smallDataURL(cv){
-  const c=document.createElement('canvas'); c.width=640; c.height=Math.round(640*cv.height/cv.width);
-  c.getContext('2d').drawImage(cv,0,0,c.width,c.height); return c.toDataURL('image/jpeg',0.7);
+function jpegB64(cv,w,q){
+  const c=document.createElement('canvas'); c.width=w; c.height=Math.round(w*cv.height/cv.width);
+  c.getContext('2d').drawImage(cv,0,0,c.width,c.height); return c.toDataURL('image/jpeg',q).split(',')[1];
 }
 $('#snapSend').addEventListener('click',async()=>{
   if(snapBusy) return;
@@ -1648,72 +1654,77 @@ $('#snapSend').addEventListener('click',async()=>{
   if(!who.num||!who.name){setMsg(snapMsg,'Write your number and name. 번호와 이름을 써 주세요.','bad'); return;}
   try{localStorage.setItem('prepRoom.who',JSON.stringify(who));}catch(e){}
   snapBusy=true; $('#snapSend').disabled=true; setMsg(snapMsg,'Sending… 보내는 중이에요…','ok');
-  if(PREP_API){
-    try{
-      const r=await fetch(PREP_API,{method:'POST',body:JSON.stringify({a:'snap',grade:who.grade,cls:who.cls,num:who.num,name:who.name,
-        sentences:freeSentences().slice(-30),img:snapCanvas.toDataURL('image/jpeg',0.85).split(',')[1]})}).then(r=>r.json());
-      if(!r.ok) throw new Error(r.err||'failed');
-      setMsg(snapMsg,'Sent! Your teacher can see it now. 보냈어요! 선생님이 볼 수 있어요.','ok');
-      const sep=document.createElement('li'); sep.className='sep'; sep.textContent='📸 Sent to teacher · 선생님께 보냄'; logEl.prepend(sep);
-    }catch(e){
-      setMsg(snapMsg,"Couldn't send. Check the internet and try again. 보내지 못했어요. 인터넷 연결을 확인하고 다시 눌러 보세요.",'bad');
-      $('#snapSend').disabled=false;
-    }
-    snapBusy=false; return;
-  }
-  await capsReady;
-  if(!caps.db||!caps.uid){
-    setMsg(snapMsg,"Can't send from here. Open the class link while signed in to Claude. 여기서는 보낼 수 없어요. Claude에 로그인한 상태로 수업 링크를 열어 주세요.",'bad');
-    snapBusy=false; $('#snapSend').disabled=false; return;
-  }
   try{
-    const shot={at:Date.now(),sentences:freeSentences().slice(-30)};
-    let uploaded=false;
-    if(caps.assets){
-      try{const b=await jpegBlob(snapCanvas,0.85); const up=await caps.assets.upload(b,{type:'image/jpeg'}); shot.asset=up.id; uploaded=true;}catch(e){}
-    }
-    if(!uploaded) shot.img=smallDataURL(snapCanvas);
-    const ref=caps.db.doc('album/'+caps.uid);
-    const cur=await ref.get();
-    let shots=(cur.exists&&Array.isArray(cur.data().shots))?cur.data().shots.slice():[];
-    shots.push(shot);
-    shots=shots.slice(-MAX_SHOTS);
-    // keep the doc small: only the newest shot may carry an inline image
-    shots=shots.map((x,i)=>(x.img&&i<shots.length-1)?Object.assign({},x,{img:null}):x);
-    await ref.set(Object.assign({},who,{updatedAt:Date.now(),shots}));
+    const r=await api({a:'snap',grade:who.grade,cls:who.cls,num:who.num,name:who.name,sentences:freeSentences().slice(-30),
+      img:snapCanvas.toDataURL('image/jpeg',0.85).split(',')[1],thumb:jpegB64(snapCanvas,360,0.7)});
+    if(!r.ok) throw new Error(r.err||'failed');
     setMsg(snapMsg,'Sent! Your teacher can see it now. 보냈어요! 선생님이 볼 수 있어요.','ok');
     const sep=document.createElement('li'); sep.className='sep'; sep.textContent='📸 Sent to teacher · 선생님께 보냄'; logEl.prepend(sep);
   }catch(e){
-    const code=e&&e.code;
-    setMsg(snapMsg,code==='invalid_argument'?"You don't have permission to send. Ask your teacher. 보낼 권한이 없어요. 선생님께 말씀드리세요.":"Couldn't send. Try again. 보내지 못했어요. 다시 눌러 보세요.",'bad');
+    setMsg(snapMsg,"Couldn't send. Check the internet and try again. 보내지 못했어요. 인터넷 연결을 확인하고 다시 눌러 보세요.",'bad');
     $('#snapSend').disabled=false;
   }
   snapBusy=false;
 });
 
-/* Teacher's album */
-const albumEl=$('#album'); let albumDocs=[], albumTab=null, albumUnsub=null;
-const shotSrc=x=>x.asset?'/_blob/'+x.asset:(x.img||'');
-const clsKey=d=>`${d.grade}-${d.cls}`;
+/* Teacher album: one class at a time; cards show each student's newest photo (thumbnail), full photo on tap */
+const albumEl=$('#album'), pwModal=$('#pwModal'), pwMsg=$('#pwMsg');
+let tpw='', albumClasses=[], albumTab=null, albumDocs=[], albumBusy=false;
+try{tpw=localStorage.getItem('prepRoom.tpw')||'';}catch(e){}
+const fullCache=new Map();
 function fmtTime(t){try{return new Date(t).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});}catch(e){return '';}}
+const thumbSrc=x=>x.thumb?'data:image/jpeg;base64,'+x.thumb:'';
+let pwSetMode=false;
+function askPw(setMode,msg){
+  pwSetMode=setMode;
+  $('#pwTitle').innerHTML=setMode?'Set a teacher password <span>처음 쓸 선생님 암호 정하기</span>':'Teacher password <span>선생님 암호</span>';
+  $('#pwHelp').textContent=setMode?'Choose 4 or more characters. Only people with this password can open the album. 4글자 이상. 이 암호를 아는 사람만 앨범을 볼 수 있어요.':'Enter the password to open the class album. 반별 앨범을 열 암호를 넣어 주세요.';
+  $('#pwInput').value=''; setMsg(pwMsg,msg||'',msg?'bad':''); pwModal.hidden=false;
+  setTimeout(()=>$('#pwInput').focus(),50);
+}
+async function loadAlbum(key){
+  if(albumBusy) return; albumBusy=true;
+  $('#albumEmpty').hidden=false; $('#albumEmpty').textContent='Loading… 불러오는 중이에요…';
+  try{
+    const [g,c]=(key||'').split('-');
+    const r=await api({a:'album',pw:tpw,grade:g||'',cls:c||''});
+    if(!r.ok){
+      albumEl.hidden=true;
+      if(r.err==='nopw') askPw(true); else {tpw=''; try{localStorage.removeItem('prepRoom.tpw');}catch(e){} askPw(false, tpwTried?'Wrong password. 암호가 틀렸어요.':'');}
+      return;
+    }
+    albumEl.hidden=false;
+    albumClasses=r.classes||[]; albumTab=r.grade?`${r.grade}-${r.cls}`:null;
+    const by=new Map();
+    (r.rows||[]).forEach(x=>{
+      const k=x.num+'|'+x.name;
+      if(!by.has(k)) by.set(k,{grade:r.grade,cls:r.cls,num:x.num,name:x.name,shots:[]});
+      by.get(k).shots.push({at:x.t,sentences:x.sents||[],thumb:x.thumb||'',id:x.id||''});
+    });
+    albumDocs=[...by.values()]; albumDocs.forEach(d=>d.shots.sort((a,b)=>a.at-b.at));
+    renderAlbum();
+  }catch(e){
+    $('#albumEmpty').textContent="Couldn't load the album. Check the internet. 앨범을 불러오지 못했어요. 인터넷 연결을 확인해 주세요.";
+  }finally{albumBusy=false;}
+}
+let tpwTried=false;
 function renderAlbum(){
-  const keys=[...new Set(albumDocs.map(clsKey))].sort((a,b)=>{const[x1,y1]=a.split('-').map(Number),[x2,y2]=b.split('-').map(Number); return x1-x2||y1-y2;});
-  if(!keys.includes(albumTab)) albumTab=keys[0]||null;
   const tabs=$('#albumTabs'); tabs.innerHTML='';
-  keys.forEach(k=>{
+  albumClasses.forEach(c=>{
+    const k=`${c.grade}-${c.cls}`;
     const b=document.createElement('button'); b.type='button'; b.className='tab';
-    const n=albumDocs.filter(d=>clsKey(d)===k).length;
-    b.textContent=`${k.replace('-','학년 ')}반 (${n})`; b.setAttribute('aria-pressed',String(k===albumTab));
-    b.addEventListener('click',()=>{albumTab=k; renderAlbum();});
+    b.textContent=`${c.grade}학년 ${c.cls}반 (${c.n})`; b.setAttribute('aria-pressed',String(k===albumTab));
+    b.addEventListener('click',()=>{if(k!==albumTab) loadAlbum(k);});
     tabs.appendChild(b);
   });
   const grid=$('#albumGrid'); grid.innerHTML='';
-  const list=albumDocs.filter(d=>clsKey(d)===albumTab).sort((a,b)=>(a.num||0)-(b.num||0));
-  $('#albumEmpty').hidden=albumDocs.length>0;
-  list.forEach(d=>{
+  const empty=$('#albumEmpty');
+  empty.textContent="No photos yet. Students' photos will show up here. 아직 사진이 없어요. 학생들이 보낸 사진이 여기에 모여요.";
+  empty.hidden=albumDocs.length>0;
+  albumDocs.sort((a,b)=>(a.num||0)-(b.num||0)).forEach(d=>{
     const last=d.shots[d.shots.length-1];
     const c=document.createElement('button'); c.type='button'; c.className='card';
-    const img=document.createElement('img'); img.alt=`${d.name}'s room`; img.loading='lazy'; img.src=shotSrc(last);
+    const img=document.createElement('img'); img.alt=`${d.name}'s room`; img.loading='lazy'; const s=thumbSrc(last); if(s) img.src=s;
     const meta=document.createElement('div'); meta.className='meta';
     const nm=document.createElement('span'); nm.className='nm'; nm.textContent=`${d.num}번 ${d.name}`;
     const sub=document.createElement('span'); sub.className='sub';
@@ -1723,35 +1734,45 @@ function renderAlbum(){
     grid.appendChild(c);
   });
 }
-const shotModal=$('#shotModal');
+const shotModal=$('#shotModal'); let shotWant='';
 function openShot(d,i){
   const x=d.shots[i];
   $('#shotTitle').textContent=`${d.grade}-${d.cls} · ${d.num}번 ${d.name}`;
-  $('#shotImg').src=shotSrc(x);
+  const im=$('#shotImg'); im.src=thumbSrc(x)||''; shotWant=x.id;
+  if(x.id){
+    if(fullCache.has(x.id)) im.src=fullCache.get(x.id);
+    else api({a:'photo',pw:tpw,id:x.id}).then(r=>{
+      if(r.ok&&r.img){const u='data:image/jpeg;base64,'+r.img; fullCache.set(x.id,u); if(shotWant===x.id) im.src=u;}
+    }).catch(()=>{});
+  }
   const ol=$('#shotSents'); ol.innerHTML='';
   (x.sentences||[]).forEach(t=>{const li=document.createElement('li'); li.textContent=String(t); ol.appendChild(li);});
   const sl=$('#shotList'); sl.innerHTML='';
   if(d.shots.length>1) d.shots.forEach((y,j)=>{
     const b=document.createElement('button'); b.type='button'; if(j===i) b.setAttribute('aria-current','true');
     b.setAttribute('aria-label',`Photo ${j+1}, ${fmtTime(y.at)}`);
-    const im=document.createElement('img'); im.alt=''; const src=shotSrc(y); if(src) im.src=src; b.appendChild(im);
+    const ti=document.createElement('img'); ti.alt=''; const s=thumbSrc(y); if(s) ti.src=s; b.appendChild(ti);
     b.addEventListener('click',()=>openShot(d,j)); sl.appendChild(b);
   });
   shotModal.hidden=false;
 }
 $('#shotClose').addEventListener('click',()=>{shotModal.hidden=true;});
 shotModal.addEventListener('click',e=>{if(e.target===shotModal) shotModal.hidden=true;});
-$('#albumBtn').addEventListener('click',()=>{
-  albumEl.hidden=false;
-  if(!albumUnsub&&caps.db){
-    albumUnsub=caps.db.collection('album').onSnapshot(snap=>{
-      albumDocs=snap.docs.map(x=>x.data()).filter(d=>d&&Array.isArray(d.shots)&&d.shots.length);
-      renderAlbum();
-    },()=>{albumUnsub=null;});
-  }
-  renderAlbum();
-});
+$('#albumBtn').addEventListener('click',()=>{tpwTried=!!tpw; loadAlbum(albumTab);});
 $('#albumClose').addEventListener('click',()=>{albumEl.hidden=true;});
+$('#albumLock').addEventListener('click',()=>{tpw=''; try{localStorage.removeItem('prepRoom.tpw');}catch(e){} albumEl.hidden=true;});
+$('#pwCancel').addEventListener('click',()=>{pwModal.hidden=true;});
+$('#pwForm').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const v=$('#pwInput').value;
+  if(v.length<4){setMsg(pwMsg,'Use 4 or more characters. 4글자 이상 써 주세요.','bad'); return;}
+  if(pwSetMode){
+    try{const r=await api({a:'setpw',pw:v}); if(!r.ok&&r.err!=='exists') throw 0; if(!r.ok){askPw(false,'A password is already set. 이미 암호가 정해져 있어요.'); return;}}
+    catch(x){setMsg(pwMsg,"Couldn't save. Try again. 저장하지 못했어요. 다시 해 보세요.",'bad'); return;}
+  }
+  tpw=v; tpwTried=true; try{localStorage.setItem('prepRoom.tpw',v);}catch(x){}
+  pwModal.hidden=true; loadAlbum(albumTab);
+});
 
 window.__prep={MISSIONS,goalMet,loadMission,setMode,runSentence,byId};
 })();
