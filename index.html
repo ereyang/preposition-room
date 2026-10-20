@@ -1494,7 +1494,7 @@ const MISSIONS=[
   {s:'plant',rel:'between',t:['bed','bookshelf'],en:'The plant is between the bed and the bookshelf.',ko:'화분 → 침대와 책장 사이'},
   {s:'lamp',rel:'between',t:['bookshelf','desk'],en:'The lamp is between the bookshelf and the desk.',ko:'램프 → 책장과 책상 사이'},
   {s:'ball',rel:'under',t:'desk',en:'The ball is under the desk.',ko:'공 → 책상 아래'}]},
- {title:'By the Window',ko:'창가',setup:[],goals:[
+ {title:'Window & Desk',ko:'창문과 책상',setup:[],goals:[
   {s:'plant',rel:'on',t:'desk',en:'The plant is on the desk.',ko:'화분 → 책상 위'},
   {s:'clock',rel:'rightWin',en:'The clock is to the right of the window.',ko:'시계 → 창문 오른쪽 벽'},
   {s:'rug',rel:'front',t:'desk',en:'The rug is in front of the desk.',ko:'러그 → 책상 앞'},
@@ -1538,7 +1538,7 @@ function goalMet(g){
 }
 
 /* Goal picture: render the target room into an offscreen target (same renderer, same meshes) */
-const SHOT={w:1200,h:780,ow:900,oh:585}, SHOT_T=new THREE.Vector3(-0.6,0,-0.5);
+const SHOT={w:1200,h:780,ow:900,oh:585}, SHOT_T=new THREE.Vector3(-0.1,0,-0.4);
 let shotRT=null;
 function cssVar(n,f){return getComputedStyle(document.documentElement).getPropertyValue(n).trim()||f;}
 function shoot(snap){
@@ -1567,13 +1567,43 @@ function shoot(snap){
   const g=out.getContext('2d'); g.imageSmoothingQuality='high'; g.drawImage(raw,0,0,SHOT.ow,SHOT.oh);
   const panel=cssVar('--panel','#fff'), ink=cssVar('--ink','#16212C'), line=cssVar('--line','#D3DBE3');
   g.textAlign='center'; g.textBaseline='middle';
+  /* Keep name tags apart: things stacked on each other (lamp on desk, book in shelf) share one spot,
+     so a tag that would cover another slides up or sideways and gets a thin line to its thing. */
+  const H=34, GAP=4, taken=[];
+  const hit=b=>taken.some(o=>b.x<o.x+o.w+GAP&&b.x+b.w+GAP>o.x&&b.y<o.y+o.h+GAP&&b.y+b.h+GAP>o.y);
+  labs.filter(l=>l.fixed).forEach(l=>{
+    g.font='500 24px Lexend, system-ui, sans-serif';
+    const w=g.measureText(l.t).width; taken.push({x:l.x-w/2,y:l.y-12-H/2,w,h:H});
+  });
+  const tags=labs.filter(l=>!l.fixed).sort((a,b)=>b.y-a.y);
+  g.font='600 24px Lexend, system-ui, sans-serif';
+  tags.forEach(l=>{
+    const w=g.measureText(l.t).width+22, x0=l.x-w/2, y0=l.y-H-2, sx=w/2+GAP+6;
+    const offs=[[0,0],[0,-(H+GAP)],[sx,0],[-sx,0],[sx,-(H+GAP)],[-sx,-(H+GAP)],[0,-2*(H+GAP)],[sx,-2*(H+GAP)],[-sx,-2*(H+GAP)],[0,-3*(H+GAP)],[0,H+GAP]];
+    let box=null;
+    for(const [dx,dy] of offs){
+      const b={x:Math.max(2,Math.min(SHOT.ow-w-2,x0+dx)),y:Math.max(2,Math.min(SHOT.oh-H-2,y0+dy)),w,h:H};
+      if(!hit(b)){box=b; break;}
+    }
+    if(!box) box={x:x0,y:y0,w,h:H};
+    taken.push(box); l.box=box;
+  });
+  tags.forEach(l=>{
+    const b=l.box;
+    if(Math.hypot(b.x+b.w/2-l.x,b.y+b.h-(l.y-2))>6){
+      const ex=Math.max(b.x+12,Math.min(b.x+b.w-12,l.x)), ey=l.y<b.y?b.y:b.y+b.h;
+      g.strokeStyle=ink; g.globalAlpha=.55; g.lineWidth=2;
+      g.beginPath(); g.moveTo(l.x,l.y); g.lineTo(ex,ey); g.stroke();
+      g.globalAlpha=1; g.fillStyle=ink; g.beginPath(); g.arc(l.x,l.y,4,0,7); g.fill();
+    }
+  });
   labs.forEach(l=>{
-    g.font=(l.fixed?'500 ':'600 ')+'24px Lexend, system-ui, sans-serif';
-    if(l.fixed){g.fillStyle='#33475B'; g.fillText(l.t,l.x,l.y-12); return;}
-    const w=g.measureText(l.t).width+22, h=34, x=l.x-w/2, y=l.y-h-2;
+    if(l.fixed){g.font='500 24px Lexend, system-ui, sans-serif'; g.fillStyle='#33475B'; g.fillText(l.t,l.x,l.y-12); return;}
+    const b=l.box;
+    g.font='600 24px Lexend, system-ui, sans-serif';
     g.fillStyle=panel; g.strokeStyle=line; g.lineWidth=1.5;
-    g.beginPath(); if(g.roundRect) g.roundRect(x,y,w,h,17); else g.rect(x,y,w,h); g.fill(); g.stroke();
-    g.fillStyle=ink; g.fillText(l.t,l.x,y+h/2+1);
+    g.beginPath(); if(g.roundRect) g.roundRect(b.x,b.y,b.w,b.h,17); else g.rect(b.x,b.y,b.w,b.h); g.fill(); g.stroke();
+    g.fillStyle=ink; g.fillText(l.t,b.x+b.w/2,b.y+b.h/2+1);
   });
   return out;
 }
@@ -1588,7 +1618,7 @@ const thumb=$('#targetThumb'), big=$('#targetBig');
 
 function clearRoom(){ITEMS.forEach(it=>Object.assign(it,{placed:false,restOn:null,mounted:false,wall:null,float:false,rot:0}));}
 /* Starting room: big furniture already in place, so students have things to use as reference points */
-const DEFAULT_SETUP=['Put the bed in the back left corner.','The wardrobe is against the left wall.','The desk is under the window.','The bookshelf is against the back wall.'];
+const DEFAULT_SETUP=['Put the bed in the back left corner.','The wardrobe is against the left wall.','The desk is against the right wall.','The bookshelf is against the back wall.'];
 function defaultRoom(){
   clearRoom();
   DEFAULT_SETUP.forEach(t=>{const r=runSentence(t); if(!r.ok) console.warn('Default setup failed:',t,r.err);});
