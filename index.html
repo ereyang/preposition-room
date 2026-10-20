@@ -240,6 +240,25 @@ body.mission-mode #snapBtn{display:none}
 .shots button[aria-current="true"]{border-color:var(--accent)}
 .shots img{width:100%; display:block}
 
+/* Sentence log to teacher (자동 저장) & 문장 기록 view */
+.save{font-size:12px; color:var(--muted); white-space:nowrap}
+.save.saved{color:var(--ok)}
+.save.fail{color:var(--warn)}
+.card.lg{padding:10px 12px; gap:4px}
+.card.lg .bar{height:6px; border-radius:3px; background:var(--chip); overflow:hidden; margin-top:4px}
+.card.lg .bar i{display:block; height:100%; background:var(--ok)}
+.lsents{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; max-height:46vh; overflow:auto}
+.lsents li{border-left:4px solid var(--ok); padding:2px 0 2px 10px; font-size:14px}
+.lsents li.bad{border-color:var(--warn)}
+.lsents .tm{font-size:11px; color:var(--muted)}
+.lsents .s{font-weight:500}
+.lsents .r{font-size:13px; color:var(--ok)}
+.lsents li.bad .r{color:var(--warn)}
+.lsents li.sep{border:0; padding:6px 0 0; font-size:12px; color:var(--muted); font-weight:600}
+.viewbar{position:absolute; left:50%; bottom:12px; transform:translateX(-50%); z-index:4; display:flex; align-items:center; gap:10px; background:var(--panel); border:2px solid var(--accent); border-radius:12px; padding:6px 8px 6px 14px; box-shadow:0 6px 20px rgba(0,0,0,.18); font-weight:600; white-space:nowrap}
+.viewbar[hidden]{display:none}
+body.viewing #cmd, body.viewing #preview, body.viewing .bar .seg, body.viewing #undo, body.viewing #reset{opacity:.35; pointer-events:none}
+
 @media (max-width: 900px){
   .app{grid-template-columns:minmax(0,1fr); grid-template-rows:auto; height:auto}
   .stage{flex:none; height:58vh; min-height:320px}
@@ -262,6 +281,8 @@ body.mission-mode #snapBtn{display:none}
         <button id="modeMission" type="button" aria-pressed="false">Mission<span class="ko">미션</span></button>
       </div>
       <button id="albumBtn" class="btn" type="button" hidden>Teacher album<span class="ko">선생님 앨범</span></button>
+      <button id="whoBtn" class="btn" type="button" hidden>-<span class="ko">나 · 바꾸기</span></button>
+      <span class="save" id="saveState"></span>
       <span class="count" id="count">0 sentences</span>
       <button id="undo" class="btn" type="button" disabled>Undo<span class="ko">되돌리기</span></button>
       <button id="reset" class="btn" type="button">Reset<span class="ko">처음부터</span></button>
@@ -292,6 +313,7 @@ body.mission-mode #snapBtn{display:none}
         <p>Tap to close · 눌러서 닫기</p>
       </div>
       <div id="toast" class="toast" hidden></div>
+      <div id="viewBar" class="viewbar" hidden><span id="viewName"></span><button id="viewBack" class="btn" type="button">Back<span class="ko">내 방으로</span></button></div>
     </div>
   </section>
 
@@ -353,10 +375,45 @@ body.mission-mode #snapBtn{display:none}
   </div>
 </div>
 
+<div id="whoModal" class="modal" hidden>
+  <form class="sheet" id="whoForm" role="dialog" aria-modal="true" aria-labelledby="whoTitle" autocomplete="off">
+    <h2 id="whoTitle">Who are you? <span>나는 누구?</span></h2>
+    <p class="ko" style="margin:0">학년·반·번호·이름을 쓰고 시작하세요. 내가 쓴 문장과 꾸민 방이 선생님께 자동으로 저장돼요.</p>
+    <div class="who">
+      <label>Grade 학년<select id="wGrade"></select></label>
+      <label>Class 반<select id="wClass"></select></label>
+      <label>No. 번호<input id="wNum" type="number" inputmode="numeric" min="1" max="60"></label>
+      <label>Name 이름<input id="wName" type="text" maxlength="20" autocomplete="off"></label>
+    </div>
+    <p class="msg" id="whoMsg" hidden></p>
+    <div class="sheet-btns">
+      <button id="whoTeacher" class="btn" type="button">Teacher<span class="ko">선생님이에요</span></button>
+      <button class="btn primary" type="submit">Start<span class="ko">시작하기</span></button>
+    </div>
+  </form>
+</div>
+
+<div id="logModal" class="modal" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="logTitle">
+    <h2 id="logTitle"></h2>
+    <p class="ko" id="logStat" style="margin:0"></p>
+    <ol class="lsents" id="logSents"></ol>
+    <div class="sheet-btns">
+      <button id="logClose" class="btn" type="button">Close<span class="ko">닫기</span></button>
+      <button id="logRoom" class="btn primary" type="button">🏠 Open room<span class="ko">방 3D로 보기</span></button>
+    </div>
+  </div>
+</div>
+
 <div id="album" class="album" hidden>
   <div class="album-top">
     <h2>Class album <span>반별 앨범</span></h2>
+    <div class="seg" role="group" aria-label="Album view">
+      <button id="viewLogs" type="button" aria-pressed="true">Sentences<span class="ko">문장 기록</span></button>
+      <button id="viewPhotos" type="button" aria-pressed="false">Photos<span class="ko">사진</span></button>
+    </div>
     <div class="tools">
+      <button id="logCopy" class="btn" type="button">Copy<span class="ko">엑셀용 복사</span></button>
       <button id="albumLock" class="btn" type="button">Lock<span class="ko">잠그기</span></button>
       <button id="albumClose" class="btn" type="button">Close<span class="ko">닫기</span></button>
     </div>
@@ -1333,24 +1390,29 @@ function refreshUI(){
 $('#cmd').addEventListener('submit',e=>{
   e.preventDefault();
   const v=input.value.trim(); if(!v) return;
+  if(viewing) return;
+  if(needWho()){showWho(); return;}
   const parts=v.split(/[.!?;\n]+/).map(t=>t.trim()).filter(Boolean);
-  let last=null;
+  let last=null; const sent=[];
   parts.forEach(p=>{
     const res=runSentence(p); addLog(p.replace(/\s+/g,' ')+'.',res); last=res;
     if(res.ok){okCount++; mCount++; if(mode==='free') freeTrail.push(p.replace(/\s+/g,' ')+'.'); const delay={}; syncAll(delay);}
+    sent.push({t:Date.now(),w:where(),s:p.replace(/\s+/g,' ')+'.',ok:!!res.ok,r:res.ok?res.lines.join(' '):res.err+' '+res.ko});
   });
   if(last) showToast(last);
   missionAfterChange();
   if(last&&last.ok) input.value='';
   renderPreview(); refreshUI();
   if(coarse) input.blur();
+  logSent(sent);
 });
-$('#undo').addEventListener('click',()=>{const s=undoStack.pop(); if(!s) return; restore(s); if(mode==='free') freeTrail.pop(); syncAll(); refreshUI(); toastEl.hidden=true; missionAfterChange();});
+$('#undo').addEventListener('click',()=>{const s=undoStack.pop(); if(!s) return; restore(s); if(mode==='free') freeTrail.pop(); syncAll(); refreshUI(); toastEl.hidden=true; missionAfterChange(); logSent([]);});
 $('#reset').addEventListener('click',()=>{
-  if(mode==='mission'){missionRestart(); return;}
+  if(mode==='mission'){missionRestart(); logSent([]); return;}
   undoStack.push(snapshot()); freeTrail.push(null);
   restore(defaultSnap);
   syncAll(); refreshUI(); toastEl.hidden=true;
+  logSent([]);
 });
 $('#view').addEventListener('click',()=>{userMoved=false; fitCamera();});
 $('#lblToggle').addEventListener('click',e=>{labelsOn=!labelsOn; e.currentTarget.setAttribute('aria-pressed',String(labelsOn)); labelsEl.classList.toggle('off',!labelsOn);});
@@ -1729,7 +1791,7 @@ function renderAlbum(){
     const k=`${c.grade}-${c.cls}`;
     const b=document.createElement('button'); b.type='button'; b.className='tab';
     b.textContent=`${c.grade}학년 ${c.cls}반 (${c.n})`; b.setAttribute('aria-pressed',String(k===albumTab));
-    b.addEventListener('click',()=>{if(k!==albumTab) loadAlbum(k);});
+    b.addEventListener('click',()=>{if(k!==albumTab){albumTab=k; openAlbum();}});
     tabs.appendChild(b);
   });
   const grid=$('#albumGrid'); grid.innerHTML='';
@@ -1773,7 +1835,7 @@ function openShot(d,i){
 }
 $('#shotClose').addEventListener('click',()=>{shotModal.hidden=true;});
 shotModal.addEventListener('click',e=>{if(e.target===shotModal) shotModal.hidden=true;});
-$('#albumBtn').addEventListener('click',()=>{tpwTried=!!tpw; loadAlbum(albumTab);});
+$('#albumBtn').addEventListener('click',()=>{tpwTried=!!tpw; openAlbum();});
 $('#albumClose').addEventListener('click',()=>{albumEl.hidden=true;});
 $('#albumLock').addEventListener('click',()=>{tpw=''; try{localStorage.removeItem('prepRoom.tpw');}catch(e){} albumEl.hidden=true;});
 $('#pwCancel').addEventListener('click',()=>{pwModal.hidden=true;});
@@ -1786,7 +1848,204 @@ $('#pwForm').addEventListener('submit',async e=>{
     catch(x){setMsg(pwMsg,"Couldn't save. Try again. 저장하지 못했어요. 다시 해 보세요.",'bad'); return;}
   }
   tpw=v; tpwTried=true; try{localStorage.setItem('prepRoom.tpw',v);}catch(x){}
-  pwModal.hidden=true; loadAlbum(albumTab);
+  pwModal.hidden=true; openAlbum();
+});
+
+/* ---------- Sentence log to teacher (자동 저장) ----------
+   Every sentence (right or wrong, with the feedback the student saw) and the current room go to
+   the same Apps Script ('log'), so the teacher sees each student's work without waiting for 📸 Snap.
+   Unsent rows wait in localStorage and go with the next send. */
+const LS={get(k,d){try{const v=localStorage.getItem(k); return v?JSON.parse(v):d;}catch(e){return d;}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}};
+const r3=n=>Math.round((n||0)*1000)/1000;
+function packRoom(){const o={}; ITEMS.forEach(it=>{if(it.placed) o[it.id]=[r3(it.x),r3(it.y),r3(it.z),r3(it.rot),it.restOn||'',it.mounted?(it.wall||'back'):'',it.float?1:0];}); return o;}
+function unpackRoom(o){
+  ITEMS.forEach(it=>{const a=o&&o[it.id];
+    Object.assign(it,a?{placed:true,x:a[0],y:a[1],z:a[2],rot:a[3],restOn:a[4]||null,mounted:!!a[5],wall:a[5]||null,float:!!a[6]}
+                      :{placed:false,restOn:null,mounted:false,wall:null,float:false,rot:0});});
+}
+function where(){return mode==='mission'?'M'+(mi+1):'free';}
+const whereKo=w=>w==='free'?'자유 모드':String(w).replace(/^M(\d+)$/,(_,n)=>`미션 ${n} · ${MISSIONS[n-1]?MISSIONS[n-1].title:''}`);
+let me=LS.get('prepRoom.who',null);
+if(me&&!(me.num&&me.name)) me=null;
+let stats=LS.get('prepRoom.stats',{ok:0,tries:0});
+let pending=LS.get('prepRoom.pending',[]), sending=false, again=false, retryT=null, dirtyT=null;
+let teacherHere=false; try{teacherHere=sessionStorage.getItem('prepRoom.teacher')==='1';}catch(e){}
+const saveEl=$('#saveState');
+function setSave(s,t){saveEl.className='save '+s; saveEl.textContent=t||{saving:'저장 중…',saved:'✓ 선생님께 저장됨',fail:'⚠ 저장 안 됨 · 다시 시도할게요'}[s]||'';}
+function needWho(){return !!PREP_API&&!me&&!teacherHere;}
+function logSent(items){
+  if(mode==='free'&&!viewing) LS.set('prepRoom.room',packRoom());
+  if(!PREP_API||!me) return;
+  items.forEach(it=>{stats.tries++; if(it.ok) stats.ok++;});
+  LS.set('prepRoom.stats',stats);
+  pending.push(...items); LS.set('prepRoom.pending',pending.slice(-300));
+  clearTimeout(dirtyT); dirtyT=setTimeout(flush,items.length?0:1500);
+}
+async function flush(){
+  if(sending){again=true; return;}
+  if(!PREP_API||!me) return;
+  sending=true; again=false; clearTimeout(retryT); setSave('saving');
+  const items=pending.slice(0,100);
+  let ok=false;
+  try{
+    const r=await api({a:'log',grade:me.grade,cls:me.cls,num:me.num,name:me.name,items,
+      ok:stats.ok,tries:stats.tries,where:where(),cleared:[...cleared].map(i=>i+1).sort((a,b)=>a-b).join(','),
+      room:JSON.stringify(mode==='free'?packRoom():(freeState?packRoomOf(freeState.snap):packRoom()))});
+    if(!r.ok) throw new Error(r.err||'failed');
+    ok=true;
+  }catch(e){
+    setSave('fail',/unknown_action/.test(e.message)?'⚠ 선생님: Apps Script 새 버전 배포가 필요해요':'');
+    if(!/unknown_action/.test(e.message)) retryT=setTimeout(flush,10000);
+  }
+  if(ok){pending.splice(0,items.length); LS.set('prepRoom.pending',pending); setSave('saved');}
+  sending=false;
+  if(ok&&(again||pending.length)) flush();
+}
+function packRoomOf(snap){const cur=snapshot(); restore(snap); const o=packRoom(); restore(cur); return o;}
+window.addEventListener('online',()=>{if(pending.length) flush();});
+
+/* Who am I (asked once per device; 📸 Snap uses the same info) */
+['wGrade','wClass'].forEach((id,k)=>{const sel=$('#'+id); for(let i=1;i<=(k?15:3);i++){const o=document.createElement('option'); o.value=o.textContent=String(i); sel.appendChild(o);}});
+const whoModal=$('#whoModal');
+function showWho(){
+  const w=me||LS.get('prepRoom.who',null);
+  if(w){$('#wGrade').value=w.grade; $('#wClass').value=w.cls; $('#wNum').value=w.num||''; $('#wName').value=w.name||'';}
+  setMsg($('#whoMsg'),'',''); whoModal.hidden=false; setTimeout(()=>$('#wNum').focus(),50);
+}
+function showMe(){
+  const b=$('#whoBtn'); b.hidden=!me;
+  if(me) b.firstChild.textContent=`${me.grade}-${me.cls} ${me.num}번 ${me.name}`;
+}
+$('#whoForm').addEventListener('submit',e=>{
+  e.preventDefault();
+  const w={grade:$('#wGrade').value,cls:$('#wClass').value,num:parseInt($('#wNum').value,10)||0,name:$('#wName').value.trim().replace(/\s+/g,' ').slice(0,20)};
+  if(!w.num||!w.name){setMsg($('#whoMsg'),'Write your number and name. 번호와 이름을 써 주세요.','bad'); return;}
+  const changed=me&&(me.grade!==w.grade||me.cls!==w.cls||me.num!==w.num||me.name!==w.name);
+  if(changed){
+    if(!confirm('다른 학생으로 바꿀까요? 이 기기의 방이 처음 상태로 돌아가요. (지금까지 쓴 문장은 선생님께 저장돼 있어요)')) return;
+    stats={ok:0,tries:0}; LS.set('prepRoom.stats',stats); LS.set('prepRoom.room',null);
+    if(mode==='mission') setMode('free');
+    restore(defaultSnap); undoStack.length=0; freeTrail.length=0; okCount=0;
+    logEl.innerHTML=''; $('#logEmpty').hidden=false; syncAll(); refreshUI();
+  }
+  me=w; LS.set('prepRoom.who',me);
+  $('#sGrade').value=w.grade; $('#sClass').value=w.cls; $('#sNum').value=w.num; $('#sName').value=w.name;
+  whoModal.hidden=true; showMe(); logSent([]);
+});
+$('#whoBtn').addEventListener('click',showWho);
+$('#whoTeacher').addEventListener('click',()=>{
+  teacherHere=true; try{sessionStorage.setItem('prepRoom.teacher','1');}catch(e){}
+  whoModal.hidden=true; tpwTried=!!tpw; openAlbum();
+});
+
+/* Free-mode room comes back after a reload */
+(function(){const saved=LS.get('prepRoom.room',null); if(saved){unpackRoom(saved); syncAll(); refreshUI();}})();
+showMe();
+if(needWho()) showWho();
+else if(pending.length) flush();
+
+/* Teacher: 문장 기록 view in the album */
+let albumView='logs', logData=null, logSel=null;
+function setAlbumView(v){
+  albumView=v;
+  $('#viewLogs').setAttribute('aria-pressed',String(v==='logs'));
+  $('#viewPhotos').setAttribute('aria-pressed',String(v==='photos'));
+  $('#logCopy').hidden=v!=='logs';
+}
+function openAlbum(){setAlbumView(albumView); return albumView==='logs'?loadLogs(albumTab):loadAlbum(albumTab);}
+$('#viewLogs').addEventListener('click',()=>{if(albumView!=='logs'){setAlbumView('logs'); loadLogs(albumTab);}});
+$('#viewPhotos').addEventListener('click',()=>{if(albumView!=='photos'){setAlbumView('photos'); loadAlbum(albumTab);}});
+async function loadLogs(key){
+  if(albumBusy) return; albumBusy=true;
+  const empty=$('#albumEmpty'); empty.hidden=false; empty.textContent='Loading… 불러오는 중이에요…';
+  try{
+    const [g,c]=(key||'').split('-');
+    const r=await api({a:'logs',pw:tpw,grade:g||'',cls:c||''});
+    if(!r.ok){
+      if(r.err==='unknown_action'){albumEl.hidden=false; $('#albumTabs').innerHTML=''; $('#albumGrid').innerHTML=''; empty.textContent='문장 기록을 보려면 Apps Script에 새 Code.gs를 붙여 넣고 "새 버전"으로 배포해 주세요. (사진 탭은 지금도 볼 수 있어요)'; return;}
+      albumEl.hidden=true;
+      if(r.err==='nopw') askPw(true); else {tpw=''; try{localStorage.removeItem('prepRoom.tpw');}catch(e){} askPw(false, tpwTried?'Wrong password. 암호가 틀렸어요.':'');}
+      return;
+    }
+    albumEl.hidden=false;
+    logData=r; albumClasses=r.classes||[]; albumTab=r.grade?`${r.grade}-${r.cls}`:null;
+    renderLogs();
+  }catch(e){
+    albumEl.hidden=false; empty.hidden=false;
+    empty.textContent="Couldn't load. 불러오지 못했어요. "+sendErrMsg(e);
+  }finally{albumBusy=false;}
+}
+function renderLogs(){
+  const tabs=$('#albumTabs'); tabs.innerHTML='';
+  albumClasses.forEach(c=>{
+    const k=`${c.grade}-${c.cls}`;
+    const b=document.createElement('button'); b.type='button'; b.className='tab';
+    b.textContent=`${c.grade}학년 ${c.cls}반 (${c.n})`; b.setAttribute('aria-pressed',String(k===albumTab));
+    b.addEventListener('click',()=>{if(k!==albumTab){albumTab=k; loadLogs(k);}});
+    tabs.appendChild(b);
+  });
+  const grid=$('#albumGrid'); grid.innerHTML='';
+  const st=(logData.students||[]).slice().sort((a,b)=>a.num-b.num);
+  const empty=$('#albumEmpty'); empty.hidden=st.length>0;
+  empty.textContent='아직 저장된 문장이 없어요. 학생들이 문장을 쓰면 여기에 모여요.';
+  st.forEach(s=>{
+    const c=document.createElement('button'); c.type='button'; c.className='card lg';
+    const pct=s.tries?Math.round(s.ok/s.tries*100):0;
+    c.innerHTML=`<span class="nm">${esc(s.num+'번 '+s.name)}</span>`+
+      `<span class="sub">성공 ${s.ok} / 시도 ${s.tries} · ${esc(fmtTime(s.t))}</span>`+
+      `<span class="sub">${esc(whereKo(s.where))}${s.cleared?` · 클리어 미션 ${esc(s.cleared)}`:''}</span>`+
+      `<span class="bar"><i style="width:${pct}%"></i></span>`;
+    c.addEventListener('click',()=>openLog(s));
+    grid.appendChild(c);
+  });
+}
+function openLog(s){
+  logSel=s;
+  $('#logTitle').textContent=`${s.grade}-${s.cls} · ${s.num}번 ${s.name}`;
+  $('#logStat').textContent=`성공 ${s.ok} / 시도 ${s.tries} · 마지막 저장 ${fmtTime(s.t)}${s.cleared?` · 클리어한 미션 ${s.cleared}`:''}`;
+  const ol=$('#logSents'); ol.innerHTML='';
+  let lastW=null;
+  (logData.rows||[]).filter(x=>x.num===s.num&&x.name===s.name).forEach(x=>{
+    if(x.where!==lastW){lastW=x.where; const sep=document.createElement('li'); sep.className='sep'; sep.textContent=whereKo(x.where); ol.appendChild(sep);}
+    const li=document.createElement('li'); li.className=x.ok?'ok':'bad';
+    li.innerHTML=`<div class="tm">${esc(fmtTime(x.t))}</div><div class="s">${highlight(x.s,parse(x.s))}</div><div class="r">${x.ok?'✓ ':'✗ '}${esc(x.r)}</div>`;
+    ol.appendChild(li);
+  });
+  if(!ol.children.length) ol.innerHTML='<li class="sep">아직 문장이 없어요.</li>';
+  $('#logModal').hidden=false;
+}
+$('#logClose').addEventListener('click',()=>{$('#logModal').hidden=true;});
+$('#logModal').addEventListener('click',e=>{if(e.target===$('#logModal')) $('#logModal').hidden=true;});
+$('#logCopy').addEventListener('click',async()=>{
+  if(!logData) return;
+  const cell=v=>String(v==null?'':v).replace(/[\t\r\n]+/g,' ');
+  const lines=[['학년','반','번호','이름','시각','모드','문장','결과','피드백'].join('\t')];
+  (logData.rows||[]).forEach(x=>lines.push([logData.grade,logData.cls,x.num,x.name,fmtTime(x.t),whereKo(x.where),x.s,x.ok?'O':'X',x.r].map(cell).join('\t')));
+  const text=lines.join('\n');
+  try{await navigator.clipboard.writeText(text);}
+  catch(e){const ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();}
+  const b=$('#logCopy'); b.firstChild.textContent='✓ Copied'; setTimeout(()=>{b.firstChild.textContent='Copy';},2500);
+});
+
+/* Look at a student's room in the 3D stage, then go back to your own */
+let viewing=null;
+$('#logRoom').addEventListener('click',()=>{
+  const s=logSel; if(!s) return;
+  let room={}; try{room=JSON.parse(s.room||'{}');}catch(e){}
+  if(!viewing) viewing={snap:snapshot(),undo:undoStack.splice(0),mode};
+  if(mode==='mission'){thumb.hidden=true; big.hidden=true; $('#missionCard').hidden=true;}
+  unpackRoom(room); syncAll(); refreshUI();
+  document.body.classList.add('viewing');
+  $('#viewName').textContent=`${s.num}번 ${s.name}의 방`;
+  $('#viewBar').hidden=false; toastEl.hidden=true;
+  $('#logModal').hidden=true; albumEl.hidden=true;
+});
+$('#viewBack').addEventListener('click',()=>{
+  if(!viewing) return;
+  restore(viewing.snap); undoStack.length=0; undoStack.push(...viewing.undo);
+  if(viewing.mode==='mission'){thumb.hidden=false; $('#missionCard').hidden=false;}
+  viewing=null; document.body.classList.remove('viewing'); $('#viewBar').hidden=true;
+  syncAll(); refreshUI(); tpwTried=!!tpw; openAlbum();
 });
 
 window.__prep={MISSIONS,goalMet,loadMission,setMode,runSentence,byId};
