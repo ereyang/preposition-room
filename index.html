@@ -150,7 +150,7 @@ h1 .hl{background:linear-gradient(transparent 55%, var(--mark) 55%); color:inher
 /* Mission: target picture in the stage */
 body.mission-mode .stage-hint{display:none}
 .target{
-  position:absolute; left:10px; top:10px; width:clamp(150px,30%,300px); padding:0; cursor:zoom-in;
+  position:absolute; left:10px; top:10px; width:clamp(170px,38%,380px); padding:0; cursor:zoom-in;
   border:2px solid var(--panel); border-radius:10px; overflow:hidden; background:var(--panel); box-shadow:0 4px 14px rgba(0,0,0,.2);
 }
 .target img{display:block; width:100%; height:auto}
@@ -482,6 +482,14 @@ const ITEMS=[
  {id:'picture',label:'picture',ko:'그림',names:['painting','picture','poster','photo','frame'],w:0.9,d:0.05,h:0.65,holds:false,hang:true},
  {id:'clock',label:'clock',ko:'시계',names:['clock'],w:0.46,d:0.06,h:0.46,holds:false,hang:true},
 ];
+/* The room is 10 m wide, so small things are drawn bigger than life (k) to stay visible.
+   Their sizes for the solver grow by the same factor, so "fits on / under / in" still matches what you see. */
+const BIG={lamp:1.5,plant:1.3,box:1.2,ball:1.3,cat:1.3,book:1.6,clock:1.5};
+ITEMS.forEach(it=>{
+  const k=it.k=BIG[it.id]||1; if(k===1) return;
+  ['w','d','h','top','under'].forEach(f=>{if(typeof it[f]==='number') it[f]*=k;});
+  if(it.inner) it.inner={w:it.inner.w*k,d:it.inner.d*k,y:it.inner.y*k};
+});
 const byId={};
 ITEMS.forEach(it=>{byId[it.id]=it; Object.assign(it,{placed:false,x:0,y:0,z:0,rot:0,restOn:null,mounted:false,wall:null,float:false});});
 const PLACE_KO={window:'창문',door:'문',wall:'벽',floor:'바닥',corner:'구석',middle:'방 가운데',room:'방'};
@@ -581,7 +589,7 @@ function tryCands(S,cands,o){
   return null;
 }
 function jit(base,axis,range,step){step=step||0.15; const out=[Object.assign({},base)]; for(let d=step; d<=range+1e-6; d+=step){for(const s of [1,-1]){const c=Object.assign({},base); c[axis]+=s*d; out.push(c);}} return out;}
-function ring(base,range,step){step=step||0.2; const out=[]; for(let i=-range;i<=range+1e-6;i+=step) for(let j=-range;j<=range+1e-6;j+=step) out.push(Object.assign({},base,{x:base.x+i,z:base.z+j})); out.sort((a,b)=>Math.hypot(a.x-base.x,a.z-base.z)-Math.hypot(b.x-base.x,b.z-base.z)); return out;}
+function ring(base,range,step){step=step||0.2; const out=[], n=Math.floor(range/step+1e-6); for(let i=-n;i<=n;i++) for(let j=-n;j<=n;j++) out.push(Object.assign({},base,{x:base.x+i*step,z:base.z+j*step})); out.sort((a,b)=>Math.hypot(a.x-base.x,a.z-base.z)-Math.hypot(b.x-base.x,b.z-base.z)); return out;}
 function mountCands(S,wall,y,along,range){
   const base=wall==='back'?{x:along,y,z:-W+S.d/2+0.012,rot:0}:{x:-W+S.d/2+0.012,y,z:along,rot:PI/2};
   return jit(base,wall==='back'?'x':'z',range,0.15);
@@ -1229,7 +1237,7 @@ const BUILD={
 
 /* Staging tray */
 const ROW1=['bed','wardrobe','sofa','desk','chair','table','bookshelf','tv','rug'], ROW2=['lamp','plant','box','ball','cat','book','picture','clock'];
-[ROW1,ROW2].forEach((row,ri)=>row.forEach((id,i)=>{const it=byId[id]; it.sx=-4.4+i*8.8/(row.length-1); it.sz=ri?6.95:5.95; it.ss=Math.min(0.75,1.05/Math.max(it.w,it.d),0.95/it.h);}));
+[ROW1,ROW2].forEach((row,ri)=>row.forEach((id,i)=>{const it=byId[id]; it.sx=-4.4+i*8.8/(row.length-1); it.sz=ri?6.95:5.95; it.ss=Math.min(0.75,1.05/Math.max(it.w,it.d),0.95/it.h)*it.k;}));
 
 const pickables=[];
 ITEMS.forEach(it=>{
@@ -1251,7 +1259,7 @@ FIXED.forEach(f=>{const el=document.createElement('span'); el.className='lbl fix
 /* Tweens */
 const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
 const tweens=new Map();
-function targetOf(it){return it.placed?{x:it.x,y:it.y,z:it.z,s:1,r:it.rot||0}:{x:it.sx,y:0,z:it.sz,s:it.ss,r:0};}
+function targetOf(it){return it.placed?{x:it.x,y:it.y,z:it.z,s:it.k,r:it.rot||0}:{x:it.sx,y:0,z:it.sz,s:it.ss,r:0};}
 function syncAll(delayMap){
   const now=performance.now();
   ITEMS.forEach(it=>{
@@ -1293,7 +1301,7 @@ function loop(now){
   renderer.render(scene,camera);
   const w=stage.clientWidth, h=stage.clientHeight;
   ITEMS.forEach(it=>{
-    const m=it.mesh; v3.set(m.position.x,m.position.y+it.h*m.scale.y+0.12,m.position.z);
+    const m=it.mesh; v3.set(m.position.x,m.position.y+it.h*m.scale.y/it.k+0.12,m.position.z);
     if(it.mounted&&it.placed) v3.y=m.position.y+it.h+0.1;
     v3.project(camera);
     const vis=v3.z<1; it.lbl.style.display=vis?'':'none';
@@ -1444,7 +1452,7 @@ BANK_PREPS.forEach(([w,k])=>{
 /* Examples */
 const EXAMPLES=[
  'Put the bed in the corner.','The desk is next to the window.','Put the lamp on the desk.',
- 'The chair is in front of the desk.','The cat is under the bed.','The picture is above the bed.',
+ 'The chair is in front of the desk.','The ball is under the bed.','The picture is above the bed.',
  'The rug is in the middle of the room.','The sofa is against the left wall.','The table is on the rug.',
  'The TV is on the table.','The ball is in the box.','The plant is between the sofa and the bookshelf.',
  'The book is in the bookshelf.','The clock is on the wall next to the window.','The box is behind the sofa.','The ball is above the table.',
@@ -1470,35 +1478,36 @@ renderExamples(); renderPreview(); refreshUI();
    the goal picture. Goals are checked by relation (not exact position), so other correct
    sentences ("Put the lamp on the desk", "The lamp is on top of the desk") pass too. */
 const MISSIONS=[
- {title:'Study Desk',ko:'공부 책상',setup:[],goals:[
-  {s:'chair',rel:'front',t:'desk',en:'The chair is in front of the desk.',ko:'의자 → 책상 앞'},
+ {title:'Study Time',ko:'공부 시간',setup:[],goals:[
   {s:'lamp',rel:'on',t:'desk',en:'The lamp is on the desk.',ko:'램프 → 책상 위'},
-  {s:'book',rel:'on',t:'desk',en:'The book is on the desk.',ko:'책 → 책상 위'}]},
+  {s:'chair',rel:'front',t:'desk',en:'The chair is in front of the desk.',ko:'의자 → 책상 앞'},
+  {s:'book',rel:'on',t:'bed',en:'The book is on the bed.',ko:'책 → 침대 위'},
+  {s:'plant',rel:'right',t:'wardrobe',en:'The plant is to the right of the wardrobe.',ko:'화분 → 옷장 오른쪽'}]},
  {title:'Bedroom',ko:'침실',setup:[],goals:[
   {s:'cat',rel:'on',t:'bed',en:'The cat is on the bed.',ko:'고양이 → 침대 위'},
-  {s:'ball',rel:'under',t:'bed',en:'The ball is under the bed.',ko:'공 → 침대 아래'},
   {s:'box',rel:'on',t:'wardrobe',en:'The box is on the wardrobe.',ko:'상자 → 옷장 위'},
-  {s:'clock',rel:'above',t:'bed',en:'The clock is above the bed.',ko:'시계 → 침대 위쪽 벽'}]},
- {title:'Living Room',ko:'거실',setup:[],goals:[
-  {s:'rug',rel:'middle',en:'The rug is in the middle of the room.',ko:'러그 → 방 가운데'},
+  {s:'ball',rel:'under',t:'desk',en:'The ball is under the desk.',ko:'공 → 책상 아래'},
+  {s:'clock',rel:'leftWin',en:'The clock is to the left of the window.',ko:'시계 → 창문 왼쪽 벽'}]},
+ {title:'Living Room',ko:'거실',setup:['The rug is in the middle of the room.'],goals:[
   {s:'table',rel:'on',t:'rug',en:'The table is on the rug.',ko:'탁자 → 러그 위'},
-  {s:'sofa',rel:'front',t:'table',en:'The sofa is in front of the table.',ko:'소파 → 탁자 앞'},
-  {s:'plant',rel:'left',t:'sofa',en:'The plant is to the left of the sofa.',ko:'화분 → 소파 왼쪽'}]},
- {title:'Book Corner',ko:'책 읽는 곳',setup:[],goals:[
+  {s:'sofa',rel:'wall',side:'front',en:'The sofa is against the front wall.',ko:'소파 → 앞쪽 벽에 붙여'},
+  {s:'tv',rel:'front',t:'bookshelf',en:'The TV is in front of the bookshelf.',ko:'TV → 책장 앞'},
+  {s:'plant',rel:'corner',side:'back right',en:'The plant is in the back right corner.',ko:'화분 → 뒤쪽 오른쪽 구석'}]},
+ {title:'Boxes and Books',ko:'상자와 책',setup:[],goals:[
+  {s:'box',rel:'corner',side:'front left',en:'The box is in the front left corner.',ko:'상자 → 앞쪽 왼쪽 구석'},
+  {s:'ball',rel:'in',t:'box',en:'The ball is in the box.',ko:'공 → 상자 안'},
   {s:'book',rel:'in',t:'bookshelf',en:'The book is in the bookshelf.',ko:'책 → 책장 안'},
-  {s:'clock',rel:'above',t:'bookshelf',en:'The clock is above the bookshelf.',ko:'시계 → 책장 위쪽 벽'},
-  {s:'box',rel:'left',t:'bookshelf',en:'The box is to the left of the bookshelf.',ko:'상자 → 책장 왼쪽'},
-  {s:'ball',rel:'in',t:'box',en:'The ball is in the box.',ko:'공 → 상자 안'}]},
- {title:'In Between',ko:'사이에',setup:[],goals:[
+  {s:'cat',rel:'under',t:'desk',en:'The cat is under the desk.',ko:'고양이 → 책상 아래'}]},
+ {title:'In Between',ko:'사이에',setup:['The chair is in the middle of the room.'],goals:[
   {s:'cat',rel:'between',t:['bed','wardrobe'],en:'The cat is between the bed and the wardrobe.',ko:'고양이 → 침대와 옷장 사이'},
-  {s:'plant',rel:'between',t:['bed','bookshelf'],en:'The plant is between the bed and the bookshelf.',ko:'화분 → 침대와 책장 사이'},
   {s:'lamp',rel:'between',t:['bookshelf','desk'],en:'The lamp is between the bookshelf and the desk.',ko:'램프 → 책장과 책상 사이'},
-  {s:'ball',rel:'under',t:'desk',en:'The ball is under the desk.',ko:'공 → 책상 아래'}]},
- {title:'Window & Desk',ko:'창문과 책상',setup:[],goals:[
-  {s:'plant',rel:'on',t:'desk',en:'The plant is on the desk.',ko:'화분 → 책상 위'},
+  {s:'ball',rel:'front',t:'chair',en:'The ball is in front of the chair.',ko:'공 → 의자 앞'},
+  {s:'plant',rel:'between',t:['chair','wardrobe'],en:'The plant is between the chair and the wardrobe.',ko:'화분 → 의자와 옷장 사이'}]},
+ {title:'Around the Room',ko:'방 한 바퀴',setup:['The rug is to the right of the wardrobe.'],goals:[
+  {s:'chair',rel:'on',t:'rug',en:'The chair is on the rug.',ko:'의자 → 러그 위'},
   {s:'clock',rel:'rightWin',en:'The clock is to the right of the window.',ko:'시계 → 창문 오른쪽 벽'},
-  {s:'rug',rel:'front',t:'desk',en:'The rug is in front of the desk.',ko:'러그 → 책상 앞'},
-  {s:'chair',rel:'on',t:'rug',en:'The chair is on the rug.',ko:'의자 → 러그 위'}]},
+  {s:'ball',rel:'underWin',en:'The ball is under the window.',ko:'공 → 창문 아래'},
+  {s:'plant',rel:'corner',side:'front right',en:'The plant is in the front right corner.',ko:'화분 → 앞쪽 오른쪽 구석'}]},
 ];
 
 /* Goal checks (viewer faces the back wall: left = -x, front = +z) */
@@ -1530,6 +1539,7 @@ function goalMet(g){
     case 'behind': return a.z2<=b.z1+.05&&b.z1-a.z2<1&&ovX(a,b,.3);
     case 'wall': {const m=.15; return !S.mounted&&S.y<.05&&!!{back:a.z1<-W+m,front:a.z2>W-m,left:a.x1<-W+m,right:a.x2>W-m}[g.side];}
     case 'middle': return Math.abs(S.x)<1&&Math.abs(S.z)<1&&S.y<.05;
+    case 'corner': {const m=.9, sd=g.side.split(' '); return !S.mounted&&S.y<.05&&sd.every(k=>({front:a.z2>W-m,back:a.z1<-W+m,left:a.x1<-W+m,right:a.x2>W-m})[k]);}
     case 'underWin': return !S.mounted&&a.z1<-W+.6&&Math.abs(S.x-WIN.x)<WIN.w/2+.3&&S.y+S.h<=WIN.y1+.02;
     case 'rightWin': return S.mounted&&S.wall==='back'&&a.x1>=WIN.x+WIN.w/2-.05&&a.x1-(WIN.x+WIN.w/2)<1.2;
     case 'leftWin': return S.mounted&&S.wall==='back'&&a.x2<=WIN.x-WIN.w/2+.05&&WIN.x-WIN.w/2-a.x2<1.2;
@@ -1538,23 +1548,41 @@ function goalMet(g){
 }
 
 /* Goal picture: render the target room into an offscreen target (same renderer, same meshes) */
-const SHOT={w:1200,h:780,ow:900,oh:585}, SHOT_T=new THREE.Vector3(-0.1,0,-0.4);
+const SHOT={w:1200,h:780,ow:900,oh:585}, SHOT_DIR=new THREE.Vector3(0.18,0.82,0.55).normalize();
 let shotRT=null;
 function cssVar(n,f){return getComputedStyle(document.documentElement).getPropertyValue(n).trim()||f;}
 function shoot(snap){
   if(!shotRT) shotRT=new THREE.WebGLRenderTarget(SHOT.w,SHOT.h);
   const saved=ITEMS.map(it=>({p:it.mesh.position.clone(),s:it.mesh.scale.x,r:it.mesh.rotation.y,v:it.mesh.visible}));
   const cur=snapshot(); restore(snap);
-  ITEMS.forEach(it=>{const m=it.mesh; if(it.placed){m.position.set(it.x,it.y,it.z); m.scale.setScalar(1); m.rotation.y=it.rot||0;} else m.visible=false;});
+  ITEMS.forEach(it=>{const m=it.mesh; if(it.placed){m.position.set(it.x,it.y,it.z); m.scale.setScalar(it.k); m.rotation.y=it.rot||0;} else m.visible=false;});
   plat.visible=false;
   const cam=new THREE.PerspectiveCamera(40,SHOT.w/SHOT.h,0.1,200);
-  cam.position.copy(SHOT_T).addScaledVector(DIR,0.7); cam.lookAt(SHOT_T); cam.updateMatrixWorld(); cam.updateProjectionMatrix();
+  /* Look down steeply and move in until the placed things (plus room for their name tags) fill the picture */
+  const pts=[];
+  ITEMS.forEach(it=>{if(!it.placed) return; const f=fp(it); for(const x of [f.x1,f.x2]) for(const z of [f.z1,f.z2]) for(const y of [it.y,it.y+it.h+0.6]) pts.push(new THREE.Vector3(x,y,z));});
+  if(!pts.length) pts.push(new THREE.Vector3(-W,0,-W),new THREE.Vector3(W,0,W));
+  const bb=new THREE.Box3().setFromPoints(pts), ctr=bb.getCenter(new THREE.Vector3()); ctr.y=Math.min(ctr.y,0.6);
+  let dist=16;
+  for(let k=0;k<4;k++){
+    cam.position.copy(ctr).addScaledVector(SHOT_DIR,dist); cam.lookAt(ctr); cam.updateMatrixWorld(); cam.updateProjectionMatrix();
+    let m=0; pts.forEach(p=>{const q=p.clone().project(cam); m=Math.max(m,Math.abs(q.x),Math.abs(q.y));});
+    dist=Math.max(6,dist*m/0.86);
+  }
+  cam.position.copy(ctr).addScaledVector(SHOT_DIR,dist); cam.lookAt(ctr); cam.updateMatrixWorld(); cam.updateProjectionMatrix();
   renderer.setRenderTarget(shotRT); renderer.render(scene,cam);
   const px=new Uint8Array(SHOT.w*SHOT.h*4); renderer.readRenderTargetPixels(shotRT,0,0,SHOT.w,SHOT.h,px);
   renderer.setRenderTarget(null);
   const labs=[];
   const proj=(p,t,fixed)=>{p.project(cam); labs.push({t,fixed,x:(p.x+1)/2*SHOT.ow,y:(1-p.y)/2*SHOT.oh});};
-  ITEMS.forEach(it=>{if(it.placed) proj(new THREE.Vector3(it.x,it.y+it.h+(it.mounted?0.1:0.12),it.z),it.label,false);});
+  const scr=p=>{p.project(cam); return {x:(p.x+1)/2*SHOT.ow,y:(1-p.y)/2*SHOT.oh};};
+  ITEMS.forEach(it=>{
+    if(!it.placed) return;
+    const f=fp(it); let x1=1e9,y1=1e9,x2=-1e9,y2=-1e9;
+    for(const x of [f.x1,f.x2]) for(const z of [f.z1,f.z2]) for(const y of [it.y,it.y+it.h]){const q=scr(new THREE.Vector3(x,y,z)); x1=Math.min(x1,q.x); x2=Math.max(x2,q.x); y1=Math.min(y1,q.y); y2=Math.max(y2,q.y);}
+    const a=scr(new THREE.Vector3(it.x,it.y+it.h,it.z));
+    labs.push({t:it.label,fixed:false,x:a.x,y:a.y,ob:{x:x1,y:y1,w:x2-x1,h:y2-y1},small:it.k>1||['chair','tv','table'].includes(it.id)});
+  });
   FIXED.forEach(f=>proj(f.p.clone(),f.t,true));
   restore(cur);
   ITEMS.forEach((it,i)=>{const m=it.mesh,s=saved[i]; m.position.copy(s.p); m.scale.setScalar(s.s); m.rotation.y=s.r; m.visible=s.v;});
@@ -1567,32 +1595,33 @@ function shoot(snap){
   const g=out.getContext('2d'); g.imageSmoothingQuality='high'; g.drawImage(raw,0,0,SHOT.ow,SHOT.oh);
   const panel=cssVar('--panel','#fff'), ink=cssVar('--ink','#16212C'), line=cssVar('--line','#D3DBE3');
   g.textAlign='center'; g.textBaseline='middle';
-  /* Keep name tags apart: things stacked on each other (lamp on desk, book in shelf) share one spot,
-     so a tag that would cover another slides up or sideways and gets a thin line to its thing. */
-  const H=34, GAP=4, taken=[];
-  const hit=b=>taken.some(o=>b.x<o.x+o.w+GAP&&b.x+b.w+GAP>o.x&&b.y<o.y+o.h+GAP&&b.y+b.h+GAP>o.y);
+  /* Name tags never cover a small thing (book, ball, cat …) or another tag: each tag tries spots
+     above / beside / below its own thing and gets a thin line to it when it had to move away. */
+  const H=34, GAP=5, taken=[];
+  const ovl=(b,o)=>b.x<o.x+o.w+GAP&&b.x+b.w+GAP>o.x&&b.y<o.y+o.h+GAP&&b.y+b.h+GAP>o.y;
   labs.filter(l=>l.fixed).forEach(l=>{
     g.font='500 24px Lexend, system-ui, sans-serif';
     const w=g.measureText(l.t).width; taken.push({x:l.x-w/2,y:l.y-12-H/2,w,h:H});
   });
-  const tags=labs.filter(l=>!l.fixed).sort((a,b)=>b.y-a.y);
+  const tags=labs.filter(l=>!l.fixed).sort((p,q)=>(q.small-p.small)||(q.y-p.y));
+  const things=tags.filter(l=>l.small).map(l=>l.ob);
   g.font='600 24px Lexend, system-ui, sans-serif';
   tags.forEach(l=>{
-    const w=g.measureText(l.t).width+22, x0=l.x-w/2, y0=l.y-H-2, sx=w/2+GAP+6;
-    const offs=[[0,0],[0,-(H+GAP)],[sx,0],[-sx,0],[sx,-(H+GAP)],[-sx,-(H+GAP)],[0,-2*(H+GAP)],[sx,-2*(H+GAP)],[-sx,-2*(H+GAP)],[0,-3*(H+GAP)],[0,H+GAP]];
+    const w=g.measureText(l.t).width+22, o=l.ob, cx=o.x+o.w/2, cy=o.y+o.h/2, R=H+GAP;
+    const cands=[[cx-w/2,o.y-H-6],[o.x+o.w+10,cy-H/2],[o.x-10-w,cy-H/2],[o.x+o.w+6,o.y-H-6],[o.x-w-6,o.y-H-6],
+      [cx-w/2,o.y-H-6-R],[o.x+o.w+6,o.y-H-6-R],[o.x-w-6,o.y-H-6-R],[cx-w/2,o.y+o.h+6],[o.x+o.w+10,cy-H/2+R],[o.x-10-w,cy-H/2+R],[cx-w/2,o.y-H-6-2*R]];
     let box=null;
-    for(const [dx,dy] of offs){
-      const b={x:Math.max(2,Math.min(SHOT.ow-w-2,x0+dx)),y:Math.max(2,Math.min(SHOT.oh-H-2,y0+dy)),w,h:H};
-      if(!hit(b)){box=b; break;}
+    for(const [x,y] of cands){
+      const bx={x:Math.max(2,Math.min(SHOT.ow-w-2,x)),y:Math.max(2,Math.min(SHOT.oh-H-2,y)),w,h:H};
+      if(!taken.some(t=>ovl(bx,t))&&!things.some(t=>t!==o&&ovl(bx,t))){box=bx; break;}
     }
-    if(!box) box={x:x0,y:y0,w,h:H};
+    if(!box) box={x:Math.max(2,Math.min(SHOT.ow-w-2,cx-w/2)),y:Math.max(2,o.y-H-6),w,h:H};
     taken.push(box); l.box=box;
   });
   tags.forEach(l=>{
-    const b=l.box;
-    if(Math.hypot(b.x+b.w/2-l.x,b.y+b.h-(l.y-2))>6){
-      const ex=Math.max(b.x+12,Math.min(b.x+b.w-12,l.x)), ey=l.y<b.y?b.y:b.y+b.h;
-      g.strokeStyle=ink; g.globalAlpha=.55; g.lineWidth=2;
+    const b=l.box, ex=Math.max(b.x,Math.min(b.x+b.w,l.x)), ey=Math.max(b.y,Math.min(b.y+b.h,l.y));
+    if(Math.hypot(ex-l.x,ey-l.y)>12){
+      g.strokeStyle=ink; g.globalAlpha=.6; g.lineWidth=2;
       g.beginPath(); g.moveTo(l.x,l.y); g.lineTo(ex,ey); g.stroke();
       g.globalAlpha=1; g.fillStyle=ink; g.beginPath(); g.arc(l.x,l.y,4,0,7); g.fill();
     }
